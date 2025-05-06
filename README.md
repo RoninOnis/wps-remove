@@ -24,7 +24,7 @@
   - Word (.doc, .docx)
   - Excel (.xls, .xlsx)
   - PowerPoint (.ppt, .pptx)
-  - Adobe Reader (.pdf)
+  - Adobe Reader (.pdf) (добавлено, но не протестировано)
 - Восстановление иконок:
   - Использует стандартные иконки из `C:\Windows\Installer\...`
   - Альтернативный путь к иконкам при отсутствии MSI-установки
