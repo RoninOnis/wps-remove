@@ -21,6 +21,59 @@ if exist "%user_roaming%" powershell -Command "Start-Process cmd -ArgumentList '
 :: 2. Очистка реестра WPS
 :: ========================
 echo Cleaning WPS registry entries...
+
+:: Проверка и создание записей TypeLib в реестре
+:: Определяем диск с Windows (используется для системных путей)
+set "SYS_DRIVE=%SystemDrive%"
+
+set "TYPED_FOLDER=HKEY_CLASSES_ROOT\TypeLib\{0002E157-0000-0000-C000-000000000046}"
+set "VER_FOLDER=%TYPED_FOLDER%\5.3"
+set "ZERO_FOLDER=%VER_FOLDER%\0"
+set "WIN32_FOLDER=%ZERO_FOLDER%\win32"
+set "FLAGS_FOLDER=%VER_FOLDER%\FLAGS"
+set "HELPDIR_FOLDER=%VER_FOLDER%\HELPDIR"
+
+echo System drive detected: %SYS_DRIVE%
+
+:: Создаём главный ключ TypeLib если отсутствует
+reg query "%TYPED_FOLDER%" >nul 2>&1 || (
+    reg add "%TYPED_FOLDER%" /f >nul
+)
+
+:: Создаём версию 5.3
+reg query "%VER_FOLDER%" >nul 2>&1 || (
+    reg add "%VER_FOLDER%" /f >nul
+)
+
+:: Устанавливаем имя по умолчанию для 5.3 (Default)
+reg add "%VER_FOLDER%" /ve /t REG_SZ /d "Microsoft Visual Basic for Applications Extensibility 5.3" /f >nul
+
+:: Устанавливаем PrimaryInteropAssemblyName
+reg add "%VER_FOLDER%" /v "PrimaryInteropAssemblyName" /t REG_SZ /d "Microsoft.Vbe.Interop, Version=12.0.0.0, Culture=neutral, PublicKeyToken=71E9BCE111E9429C" /f >nul
+
+:: Создаём подраздел 0
+reg query "%ZERO_FOLDER%" >nul 2>&1 || (
+    reg add "%ZERO_FOLDER%" /f >nul
+)
+
+:: Создаём win32 и задаём путь к OLB файлу, используя системный диск
+set "EXPECTED_OLB=%SYS_DRIVE%\Program Files (x86)\Common Files\Microsoft Shared\VBA\VBA6\VBE6EXT.OLB"
+reg query "%WIN32_FOLDER%" >nul 2>&1 || (
+    reg add "%WIN32_FOLDER%" /f >nul
+)
+
+reg add "%WIN32_FOLDER%" /ve /t REG_SZ /d "%EXPECTED_OLB%" /f >nul
+
+:: FLAGS = "0"
+reg add "%FLAGS_FOLDER%" /f >nul
+reg add "%FLAGS_FOLDER%" /ve /t REG_SZ /d "0" /f >nul
+
+:: HELPDIR = "[{...}]"
+reg add "%HELPDIR_FOLDER%" /f >nul
+reg add "%HELPDIR_FOLDER%" /ve /t REG_SZ /d "[{0002E157-0000-0000-C000-000000000046}]" /f >nul
+
+echo TypeLib registry entries ensured.
+
 reg delete "HKCU\Software\Kingsoft" /f >nul 2>&1
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "WPS Office" /f >nul 2>&1
 
