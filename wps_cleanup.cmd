@@ -150,8 +150,8 @@ reg add "HKCU\Software\Classes\.ppt"  /ve /t REG_SZ /d "PowerPoint.Show.8" /f >n
 reg add "HKCU\Software\Classes\.pptx" /ve /t REG_SZ /d "PowerPoint.Show.12" /f >nul
 reg add "HKCU\Software\Classes\PowerPoint.Show.8\shell\open\command"  /ve /t REG_SZ /d "\"%OFFICE_ROOT%\POWERPNT.EXE\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\PowerPoint.Show.12\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\POWERPNT.EXE\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\PowerPoint.Show.8\DefaultIcon"  /ve /t REG_SZ /d "%ICONS_FOLDER%\ppticons.exe,1" /f >nul
-reg add "HKCU\Software\Classes\PowerPoint.Show.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\ppticons.exe,1" /f >nul
+reg add "HKCU\Software\Classes\PowerPoint.Show.8\DefaultIcon"  /ve /t REG_SZ /d "%ICONS_FOLDER%\pptico.exe,1" /f >nul
+reg add "HKCU\Software\Classes\PowerPoint.Show.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\pptico.exe,1" /f >nul
 
 :: ========================
 :: 5. Restore "New → Word Document" context menu
