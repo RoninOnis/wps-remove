@@ -1,226 +1,195 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableDelayedExpansion
+
+echo.
+echo ===================================================
+echo   Removing WPS traces and restoring Office
+echo ===================================================
+echo.
 
 :: ========================
-:: 1. Удаление WPS
+:: 1. Search for Office and icons paths
 :: ========================
-echo Removing WPS from AppData...
+echo [Searching for Office and icons folder...]
 
-:: Run taskkill with admin privileges
-powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpscenter.exe' -Verb RunAs -WindowStyle Hidden -Wait"
-powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpscloudsvr.exe' -Verb RunAs -WindowStyle Hidden -Wait"
+set "OFFICE_ROOT="
+set "ICONS_FOLDER="
 
-set "user_local=%LOCALAPPDATA%\Kingsoft"
-set "user_roaming=%APPDATA%\Kingsoft"
+for /f "delims=" %%A in ('where /r c:\ WINWORD.EXE 2^>nul') do (
+    set "candidate=%%~dpA"
+    set "candidate=!candidate:~0,-1!"
+    echo "!candidate!" | findstr /i /c:"ClickToRun" /c:"Downloaded" /c:"Packages" >nul || (
+        set "OFFICE_ROOT=!candidate!"
+        goto :office_found
+    )
+)
+:office_found
 
-:: Run folder deletion with admin privileges
-if exist "%user_local%" powershell -Command "Start-Process cmd -ArgumentList '/c rmdir /s /q \"%user_local%\"' -Verb RunAs -WindowStyle Hidden -Wait"
-if exist "%user_roaming%" powershell -Command "Start-Process cmd -ArgumentList '/c rmdir /s /q \"%user_roaming%\"' -Verb RunAs -WindowStyle Hidden -Wait"
+if not defined OFFICE_ROOT (
+    echo Office not found on disk.
+    echo Trying standard paths...
+    for %%p in (
+        "C:\Program Files\Microsoft Office\root\Office16"
+        "C:\Program Files (x86)\Microsoft Office\root\Office16"
+        "C:\Program Files\Microsoft Office\root\Office15"
+        "C:\Program Files (x86)\Microsoft Office\root\Office15"
+    ) do (
+        if exist "%%~p\WINWORD.EXE" (
+            set "OFFICE_ROOT=%%~p"
+            goto :office_done
+        )
+    )
+    :office_done
+    if not defined OFFICE_ROOT (
+        echo Warning: Office not found anywhere. File associations may not work.
+        set "OFFICE_ROOT=C:\Program Files\Microsoft Office\root\Office16"
+    )
+)
+
+for /f "delims=" %%F in ('where /r c:\ wordicon.* 2^>nul') do (
+    set "dir=%%~dpF"
+    set "dir=!dir:~0,-1!"
+    echo "!dir!" | findstr /r /c:"{[0-9A-F-]*}" >nul && (
+        set "ICONS_FOLDER=!dir!"
+        goto :icons_found
+    )
+)
+:icons_found
+
+if not defined ICONS_FOLDER (
+    echo GUID folder with icons not found → using Office folder as fallback.
+    set "ICONS_FOLDER=%OFFICE_ROOT%"
+)
+
+echo.
+echo Detected paths:
+echo   Office      → %OFFICE_ROOT%
+echo   Icons       → %ICONS_FOLDER%
+echo.
 
 :: ========================
-:: 2. Очистка реестра WPS
+:: 2. Remove WPS traces
 :: ========================
-echo Cleaning WPS registry entries...
+echo Removing WPS processes and folders...
 
-:: Проверка и создание записей TypeLib в реестре
-:: Определяем диск с Windows (используется для системных путей)
-set "SYS_DRIVE=%SystemDrive%"
+powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpscenter.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
+powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpscloudsvr.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
 
-set "TYPED_FOLDER=HKEY_CLASSES_ROOT\TypeLib\{0002E157-0000-0000-C000-000000000046}"
-set "VER_FOLDER=%TYPED_FOLDER%\5.3"
-set "ZERO_FOLDER=%VER_FOLDER%\0"
-set "WIN32_FOLDER=%ZERO_FOLDER%\win32"
-set "FLAGS_FOLDER=%VER_FOLDER%\FLAGS"
-set "HELPDIR_FOLDER=%VER_FOLDER%\HELPDIR"
+set "local_kingsoft=%LOCALAPPDATA%\Kingsoft"
+set "roaming_kingsoft=%APPDATA%\Kingsoft"
 
-echo System drive detected: %SYS_DRIVE%
+if exist "%local_kingsoft%"   powershell -Command "Start-Process cmd -ArgumentList '/c rmdir /s /q \"%local_kingsoft%\"' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
+if exist "%roaming_kingsoft%" powershell -Command "Start-Process cmd -ArgumentList '/c rmdir /s /q \"%roaming_kingsoft%\"' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
 
-:: Создаём главный ключ TypeLib если отсутствует
-reg query "%TYPED_FOLDER%" >nul 2>&1 || (
-    reg add "%TYPED_FOLDER%" /f >nul
-)
-
-:: Создаём версию 5.3
-reg query "%VER_FOLDER%" >nul 2>&1 || (
-    reg add "%VER_FOLDER%" /f >nul
-)
-
-:: Устанавливаем имя по умолчанию для 5.3 (Default)
-reg add "%VER_FOLDER%" /ve /t REG_SZ /d "Microsoft Visual Basic for Applications Extensibility 5.3" /f >nul
-
-:: Устанавливаем PrimaryInteropAssemblyName
-reg add "%VER_FOLDER%" /v "PrimaryInteropAssemblyName" /t REG_SZ /d "Microsoft.Vbe.Interop, Version=12.0.0.0, Culture=neutral, PublicKeyToken=71E9BCE111E9429C" /f >nul
-
-:: Создаём подраздел 0
-reg query "%ZERO_FOLDER%" >nul 2>&1 || (
-    reg add "%ZERO_FOLDER%" /f >nul
-)
-
-:: Создаём win32 и задаём путь к OLB файлу, используя системный диск
-set "EXPECTED_OLB=%SYS_DRIVE%\Program Files (x86)\Common Files\Microsoft Shared\VBA\VBA6\VBE6EXT.OLB"
-reg query "%WIN32_FOLDER%" >nul 2>&1 || (
-    reg add "%WIN32_FOLDER%" /f >nul
-)
-
-reg add "%WIN32_FOLDER%" /ve /t REG_SZ /d "%EXPECTED_OLB%" /f >nul
-
-:: FLAGS = "0"
-reg add "%FLAGS_FOLDER%" /f >nul
-reg add "%FLAGS_FOLDER%" /ve /t REG_SZ /d "0" /f >nul
-
-:: HELPDIR = "[{...}]"
-reg add "%HELPDIR_FOLDER%" /f >nul
-reg add "%HELPDIR_FOLDER%" /ve /t REG_SZ /d "[{0002E157-0000-0000-C000-000000000046}]" /f >nul
-
-echo TypeLib registry entries ensured.
+:: ========================
+:: 3. Clean registry + restore VBA TypeLib
+:: ========================
+echo Cleaning registry and restoring VBA Extensibility...
 
 reg delete "HKCU\Software\Kingsoft" /f >nul 2>&1
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "WPS Office" /f >nul 2>&1
 
-set wps_classes=ET. KET. KWPP. KWPS. WPP. WPS. WPSCloudSv WPSFileSync
-for %%c in (%wps_classes%) do (
-    reg delete "HKCU\Software\Classes\%%c" /f >nul 2>&1
-    reg delete "HKCU\Software\Classes\%%c*" /f >nul 2>&1
+set "wps_prefixes=ET. KET. KWPP. KWPS. WPP. WPS. WPSCloudSv WPSFileSync"
+for %%p in (%wps_prefixes%) do (
+    reg delete "HKCU\Software\Classes\%%p" /f >nul 2>&1
+    reg delete "HKEY_CLASSES_ROOT\%%p" /f >nul 2>&1
 )
 
-:: Префиксы для удаления (должны быть в начале имени раздела)
-set "prefixes=ET. KET. KWPP. KWPS. WPP. WPS."
+:: ─── Restore VBA Extensibility 5.3 TypeLib ───
+set "SYSTEM_DRIVE=%SystemDrive%"
 
-echo Searching and deleting registry keys in HKEY_CLASSES_ROOT...
-echo.
+set "TYPELIB_KEY=HKEY_CLASSES_ROOT\TypeLib\{0002E157-0000-0000-C000-000000000046}"
+set "VERSION_KEY=%TYPELIB_KEY%\5.3"
+set "ZERO_KEY=%VERSION_KEY%\0"
+set "WIN32_KEY=%ZERO_KEY%\win32"
+set "FLAGS_KEY=%VERSION_KEY%\FLAGS"
+set "HELPDIR_KEY=%VERSION_KEY%\HELPDIR"
 
-:: Получаем список всех подразделов в HKCR
-for /f "tokens=*" %%a in ('reg query "HKEY_CLASSES_ROOT"') do (
-    set "key=%%a"
-    
-    :: Убираем "HKEY_CLASSES_ROOT\" из пути
-    set "key=!key:HKEY_CLASSES_ROOT\=!"
-    
-    :: Проверяем, начинается ли ключ с одного из префиксов
-    for %%p in (%prefixes%) do (
-        if "!key!"=="%%p!key:*%%p=!" (
-            echo Deleting: !key!
-            reg delete "HKEY_CLASSES_ROOT\!key!" /f >nul 2>&1
-        )
-    )
-)
+echo Restoring VBA TypeLib entries...
 
-echo Searching and deleting registry keys in HKCU\Software\Classes...
-echo.
+reg query "%TYPELIB_KEY%" >nul 2>&1 || reg add "%TYPELIB_KEY%" /f >nul
+reg query "%VERSION_KEY%"   >nul 2>&1 || reg add "%VERSION_KEY%"   /f >nul
 
-:: Получаем список всех подразделов в HKCU\Software\Classes
-for /f "tokens=*" %%a in ('reg query "HKCU\Software\Classes"') do (
-    set "key=%%a"
-    
-    :: Убираем "HKEY_CURRENT_USER\Software\Classes\" из пути
-    set "key=!key:HKEY_CURRENT_USER\Software\Classes\=!"
-    
-    :: Проверяем, начинается ли ключ с одного из префиксов
-    for %%p in (%prefixes%) do (
-        if "!key!"=="%%p!key:*%%p=!" (
-            echo Deleting: !key!
-            reg delete "HKCU\Software\Classes\!key!" /f >nul 2>&1
-        )
-    )
-)
+reg add "%VERSION_KEY%" /ve /t REG_SZ /d "Microsoft Visual Basic for Applications Extensibility 5.3" /f >nul
+reg add "%VERSION_KEY%" /v "PrimaryInteropAssemblyName" /t REG_SZ /d "Microsoft.Vbe.Interop, Version=12.0.0.0, Culture=neutral, PublicKeyToken=71E9BCE111E9429C" /f >nul
 
-:: Удаление ассоциаций файлов
-set extensions=.doc .docx .xls .xlsx .ppt .pptx .rtf .txt .csv .dot .dotx .xlt .xltx .pot .potx
-for %%e in (%extensions%) do (
-    reg delete "HKCU\Software\Classes\%%e" /f >nul 2>&1
-    reg delete "HKCU\Software\Classes\%%e\OpenWithProgids" /f >nul 2>&1
-)
+reg query "%ZERO_KEY%" >nul 2>&1 || reg add "%ZERO_KEY%" /f >nul
+reg query "%WIN32_KEY%" >nul 2>&1 || reg add "%WIN32_KEY%" /f >nul
+
+set "EXPECTED_OLB=%SYSTEM_DRIVE%\Program Files (x86)\Common Files\Microsoft Shared\VBA\VBA6\VBE6EXT.OLB"
+reg add "%WIN32_KEY%" /ve /t REG_SZ /d "%EXPECTED_OLB%" /f >nul
+
+reg add "%FLAGS_KEY%"   /ve /t REG_SZ /d "0" /f >nul
+reg add "%HELPDIR_KEY%" /ve /t REG_SZ /d "[{0002E157-0000-0000-C000-000000000046}]" /f >nul
+
+echo VBA TypeLib entries restored.
 
 :: ========================
-:: 3. Восстановление Office
+:: 4. Restore file associations
 :: ========================
-echo Restoring Office file associations...
-
-set "office_path=C:\Program Files\Microsoft Office\root\Office16"
-set "msi_icon_path=C:\Windows\Installer\{90160000-0011-0000-1000-0000000FF1CE}"
-set "pdf_reader_path=C:\Program Files (x86)\Adobe\Acrobat Reader DC\Reader\AcroRd32.exe"
-
-:: Проверка существования папки с иконками
-if not exist "%msi_icon_path%" (
-    echo Warning: Office icons folder not found!
-    echo Using standard EXE file icons.
-    set "msi_icon_path=%office_path%"
-)
+echo Restoring file associations...
 
 :: Word
-reg add "HKCU\Software\Classes\.doc" /ve /t REG_SZ /d "Word.Document.8" /f >nul
-reg add "HKCU\Software\Classes\Word.Document.8\shell\open\command" /ve /t REG_SZ /d "\"%office_path%\WINWORD.EXE\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\Word.Document.8\DefaultIcon" /ve /t REG_SZ /d "%msi_icon_path%\wordicon.exe,1" /f >nul
-
+reg add "HKCU\Software\Classes\.doc"  /ve /t REG_SZ /d "Word.Document.8" /f >nul
 reg add "HKCU\Software\Classes\.docx" /ve /t REG_SZ /d "Word.Document.12" /f >nul
-reg add "HKCU\Software\Classes\Word.Document.12\shell\open\command" /ve /t REG_SZ /d "\"%office_path%\WINWORD.EXE\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\Word.Document.12\DefaultIcon" /ve /t REG_SZ /d "%msi_icon_path%\wordicon.exe,1" /f >nul
+reg add "HKCU\Software\Classes\Word.Document.8\shell\open\command"  /ve /t REG_SZ /d "\"%OFFICE_ROOT%\WINWORD.EXE\" \"%%1\"" /f >nul
+reg add "HKCU\Software\Classes\Word.Document.12\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\WINWORD.EXE\" \"%%1\"" /f >nul
+reg add "HKCU\Software\Classes\Word.Document.8\DefaultIcon"  /ve /t REG_SZ /d "%ICONS_FOLDER%\wordicon.exe,1" /f >nul
+reg add "HKCU\Software\Classes\Word.Document.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\wordicon.exe,1" /f >nul
 
 :: Excel
-reg add "HKCU\Software\Classes\.xls" /ve /t REG_SZ /d "Excel.Sheet.8" /f >nul
-reg add "HKCU\Software\Classes\Excel.Sheet.8\shell\open\command" /ve /t REG_SZ /d "\"%office_path%\EXCEL.EXE\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\Excel.Sheet.8\DefaultIcon" /ve /t REG_SZ /d "%msi_icon_path%\xlicons.exe,1" /f >nul
-
+reg add "HKCU\Software\Classes\.xls"  /ve /t REG_SZ /d "Excel.Sheet.8" /f >nul
 reg add "HKCU\Software\Classes\.xlsx" /ve /t REG_SZ /d "Excel.Sheet.12" /f >nul
-reg add "HKCU\Software\Classes\Excel.Sheet.12\shell\open\command" /ve /t REG_SZ /d "\"%office_path%\EXCEL.EXE\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\Excel.Sheet.12\DefaultIcon" /ve /t REG_SZ /d "%msi_icon_path%\xlicons.exe,1" /f >nul
+reg add "HKCU\Software\Classes\Excel.Sheet.8\shell\open\command"  /ve /t REG_SZ /d "\"%OFFICE_ROOT%\EXCEL.EXE\" \"%%1\"" /f >nul
+reg add "HKCU\Software\Classes\Excel.Sheet.12\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\EXCEL.EXE\" \"%%1\"" /f >nul
+reg add "HKCU\Software\Classes\Excel.Sheet.8\DefaultIcon"  /ve /t REG_SZ /d "%ICONS_FOLDER%\xlicons.exe,1" /f >nul
+reg add "HKCU\Software\Classes\Excel.Sheet.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\xlicons.exe,1" /f >nul
 
 :: PowerPoint
-reg add "HKCU\Software\Classes\.ppt" /ve /t REG_SZ /d "PowerPoint.Show.8" /f >nul
-reg add "HKCU\Software\Classes\PowerPoint.Show.8\shell\open\command" /ve /t REG_SZ /d "\"%office_path%\POWERPNT.EXE\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\PowerPoint.Show.8\DefaultIcon" /ve /t REG_SZ /d "%msi_icon_path%\ppticons.exe,1" /f >nul
-
+reg add "HKCU\Software\Classes\.ppt"  /ve /t REG_SZ /d "PowerPoint.Show.8" /f >nul
 reg add "HKCU\Software\Classes\.pptx" /ve /t REG_SZ /d "PowerPoint.Show.12" /f >nul
-reg add "HKCU\Software\Classes\PowerPoint.Show.12\shell\open\command" /ve /t REG_SZ /d "\"%office_path%\POWERPNT.EXE\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\PowerPoint.Show.12\DefaultIcon" /ve /t REG_SZ /d "%msi_icon_path%\ppticons.exe,1" /f >nul
-
-:: PDF
-reg add "HKCU\Software\Classes\.pdf" /ve /t REG_SZ /d "AcroExch.Document.DC" /f >nul
-reg add "HKCU\Software\Classes\AcroExch.Document.DC\shell\open\command" /ve /t REG_SZ /d "\"%pdf_reader_path%\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\AcroExch.Document.DC\DefaultIcon" /ve /t REG_SZ /d "%pdf_reader_path%,0" /f >nul
+reg add "HKCU\Software\Classes\PowerPoint.Show.8\shell\open\command"  /ve /t REG_SZ /d "\"%OFFICE_ROOT%\POWERPNT.EXE\" \"%%1\"" /f >nul
+reg add "HKCU\Software\Classes\PowerPoint.Show.12\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\POWERPNT.EXE\" \"%%1\"" /f >nul
+reg add "HKCU\Software\Classes\PowerPoint.Show.8\DefaultIcon"  /ve /t REG_SZ /d "%ICONS_FOLDER%\ppticons.exe,1" /f >nul
+reg add "HKCU\Software\Classes\PowerPoint.Show.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\ppticons.exe,1" /f >nul
 
 :: ========================
-:: 4. Восстановление "Создать -> Документ Word"
+:: 5. Restore "New → Word Document" context menu
 :: ========================
-echo Restoring "New -> Word Document" option...
+echo Restoring "New → Word Document" option...
 
-:: Шаблон для нового документа Word
-set "word_template=%USERPROFILE%\Documents\Custom Office Templates\Blank.docx"
-if not exist "%USERPROFILE%\Documents\Custom Office Templates\" mkdir "%USERPROFILE%\Documents\Custom Office Templates\"
+set "TEMPLATES_FOLDER=%USERPROFILE%\Documents\Custom Office Templates"
+if not exist "%TEMPLATES_FOLDER%" mkdir "%TEMPLATES_FOLDER%"
 
-:: Если шаблона нет - создаём пустой
-if not exist "%word_template%" (
-    echo. > "%word_template%"
-)
+set "BLANK_DOC=%TEMPLATES_FOLDER%\Blank.docx"
+if not exist "%BLANK_DOC%" echo. > "%BLANK_DOC%"
 
-:: Добавляем в контекстное меню
-reg add "HKCU\Software\Classes\.docx\ShellNew" /v "FileName" /t REG_SZ /d "%word_template%" /f >nul
-reg add "HKCU\Software\Classes\.doc\ShellNew" /v "FileName" /t REG_SZ /d "%word_template%" /f >nul
-
-:: Альтернативный способ (если первый не сработает)
-reg add "HKCU\Software\Classes\.docx\ShellNew" /v "NullFile" /t REG_SZ /d "" /f >nul
-reg add "HKCU\Software\Classes\.doc\ShellNew" /v "NullFile" /t REG_SZ /d "" /f >nul
+reg add "HKCU\Software\Classes\.docx\ShellNew" /v "FileName" /t REG_SZ /d "%BLANK_DOC%" /f >nul
+reg add "HKCU\Software\Classes\.doc\ShellNew"  /v "FileName" /t REG_SZ /d "%BLANK_DOC%" /f >nul
+reg add "HKCU\Software\Classes\.docx\ShellNew" /v "NullFile" /t REG_SZ /d "" /f >nul 2>nul
+reg add "HKCU\Software\Classes\.doc\ShellNew"  /v "NullFile" /t REG_SZ /d "" /f >nul 2>nul
 
 :: ========================
-:: 5. Обновление иконок
+:: 6. Update icon cache
 :: ========================
 echo Updating icon cache...
 
-:: Очистка кэша иконок
-del /q "%userprofile%\AppData\Local\IconCache.db" >nul 2>&1
-del /q "%userprofile%\AppData\Local\Microsoft\Windows\Explorer\iconcache*" >nul 2>&1
+del /q /f "%LocalAppData%\IconCache.db" >nul 2>&1
+del /q /f "%LocalAppData%\Microsoft\Windows\Explorer\iconcache_*" >nul 2>&1
 
-:: Перезапуск проводника с правами администратора
-powershell -Command "Start-Process taskkill -ArgumentList '/f /im explorer.exe' -Verb RunAs -WindowStyle Hidden -Wait"
+powershell -Command "Start-Process taskkill -ArgumentList '/f /im explorer.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
 start explorer.exe >nul 2>&1
-timeout /t 3 >nul
+timeout /t 4 >nul
 
 :: ========================
-:: Готово!
+:: Done
 :: ========================
 echo.
-echo [+] WPS Office has been removed.
-echo [+] File associations have been restored.
-echo [+] Icons have been updated.
+echo ===================================================
+echo   Completed!
+echo   WPS traces removed, Office associations restored.
+echo   Office path:    %OFFICE_ROOT%
+echo   Icons from:     %ICONS_FOLDER%
+echo ===================================================
 echo.
 pause
