@@ -125,6 +125,40 @@ reg add "%HELPDIR_KEY%" /ve /t REG_SZ /d "[{0002E157-0000-0000-C000-000000000046
 echo VBA TypeLib entries restored.
 
 :: ========================
+:: WPS Photo / WPS Pictures Aggressive Cleanup
+:: ========================
+echo.
+echo Removing WPS Photo preview handlers and image associations...
+
+:: 1. Deleting all WPS.PIC.* and similar ProgIDs
+for /f "delims=" %%K in ('reg query "HKCR" /s /f "WPS.PIC" 2^>nul ^| findstr /b "HKEY"') do reg delete "%%K" /f >nul 2>&1
+for /f "delims=" %%K in ('reg query "HKCU\Software\Classes" /s /f "WPS.PIC" 2^>nul ^| findstr /b "HKEY"') do reg delete "%%K" /f >nul 2>&1
+
+reg delete "HKCR\WPSPhoto" /f >nul 2>&1
+reg delete "HKCR\WPS.Photos" /f >nul 2>&1
+reg delete "HKCR\Kingsoft.WPSPhoto" /f >nul 2>&1
+reg delete "HKCR\KSPhoto" /f >nul 2>&1
+
+:: 2. Removing the preview and thumbnail handlers (set "img_ext=.jpg .jpeg .png .gif .bmp .tif .tiff .webp .heic .avif .ico")
+set "img_ext=.jpg .jpeg .png"
+
+for %%e in (%img_ext%) do (
+    reg delete "HKCR\%%e\ShellEx\{8895b1c6-b41f-4c1c-a562-0d564250836f}" /f >nul 2>&1
+    reg delete "HKCR\SystemFileAssociations\%%e\ShellEx\{8895b1c6-b41f-4c1c-a562-0d564250836f}" /f >nul 2>&1
+    reg delete "HKCR\%%e\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}" /f >nul 2>&1
+    reg delete "HKCR\SystemFileAssociations\%%e\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}" /f >nul 2>&1
+)
+
+:: 3. Restoring standard Windows image associations
+reg add "HKCR\.jpg"  /ve /t REG_SZ /d "jpegfile" /f >nul
+reg add "HKCR\.jpeg" /ve /t REG_SZ /d "jpegfile" /f >nul
+reg add "HKCR\.png"  /ve /t REG_SZ /d "pngfile"  /f >nul
+reg add "HKCR\.gif"  /ve /t REG_SZ /d "giffile"  /f >nul
+reg add "HKCR\.bmp"  /ve /t REG_SZ /d "Paint.Picture" /f >nul
+
+echo WPS Photo preview handlers removed.
+
+:: ========================
 :: 4. Restore file associations
 :: ========================
 echo Restoring file associations...
@@ -134,12 +168,16 @@ reg add "HKCU\Software\Classes\.doc"  /ve /t REG_SZ /d "Word.Document.8" /f >nul
 reg add "HKCU\Software\Classes\.docx" /ve /t REG_SZ /d "Word.Document.12" /f >nul
 reg add "HKCU\Software\Classes\Word.Document.8\shell\open\command"  /ve /t REG_SZ /d "\"%OFFICE_ROOT%\WINWORD.EXE\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\Word.Document.12\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\WINWORD.EXE\" \"%%1\"" /f >nul
+reg add "HKCU\Software\Classes\Excel.CSV\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\EXCEL.EXE\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\Word.Document.8\DefaultIcon"  /ve /t REG_SZ /d "%ICONS_FOLDER%\wordicon.exe,1" /f >nul
 reg add "HKCU\Software\Classes\Word.Document.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\wordicon.exe,1" /f >nul
+reg add "HKCU\Software\Classes\Excel.CSV\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\xlicons.exe,1" /f >nul
 
 :: Excel
 reg add "HKCU\Software\Classes\.xls"  /ve /t REG_SZ /d "Excel.Sheet.8" /f >nul
 reg add "HKCU\Software\Classes\.xlsx" /ve /t REG_SZ /d "Excel.Sheet.12" /f >nul
+reg add "HKCU\Software\Classes\.csv" /ve /t REG_SZ /d "Excel.CSV" /f >nul
+reg add "HKCU\Software\Classes\.csv" /v "Content Type" /t REG_SZ /d "text/csv" /f >nul
 reg add "HKCU\Software\Classes\Excel.Sheet.8\shell\open\command"  /ve /t REG_SZ /d "\"%OFFICE_ROOT%\EXCEL.EXE\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\Excel.Sheet.12\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\EXCEL.EXE\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\Excel.Sheet.8\DefaultIcon"  /ve /t REG_SZ /d "%ICONS_FOLDER%\xlicons.exe,1" /f >nul
@@ -154,9 +192,9 @@ reg add "HKCU\Software\Classes\PowerPoint.Show.8\DefaultIcon"  /ve /t REG_SZ /d 
 reg add "HKCU\Software\Classes\PowerPoint.Show.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\pptico.exe,1" /f >nul
 
 :: ========================
-:: 5. Restore "New → Word Document" context menu
+:: 5. Restore "New - WORD/EXCEL Document" context menu
 :: ========================
-echo Restoring "New → Word Document" option...
+echo Restoring "New - WORD/EXCEL Document" option...
 
 set "TEMPLATES_FOLDER=%USERPROFILE%\Documents\Custom Office Templates"
 if not exist "%TEMPLATES_FOLDER%" mkdir "%TEMPLATES_FOLDER%"
@@ -172,10 +210,11 @@ reg add "HKCU\Software\Classes\.doc\ShellNew"  /v "NullFile" /t REG_SZ /d "" /f 
 :: ========================
 :: 6. Update icon cache
 :: ========================
-echo Updating icon cache...
+echo Updating icon and thumbnail cache...
 
 del /q /f "%LocalAppData%\IconCache.db" >nul 2>&1
 del /q /f "%LocalAppData%\Microsoft\Windows\Explorer\iconcache_*" >nul 2>&1
+del /q /f "%LocalAppData%\Microsoft\Windows\Explorer\thumbcache_*.db" >nul 2>&1
 
 powershell -Command "Start-Process taskkill -ArgumentList '/f /im explorer.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
 start explorer.exe >nul 2>&1
