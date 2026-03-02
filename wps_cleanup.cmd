@@ -57,23 +57,52 @@ for /f "delims=" %%F in ('where /r c:\ wordicon.* 2^>nul') do (
 :icons_found
 
 if not defined ICONS_FOLDER (
-    echo GUID folder with icons not found → using Office folder as fallback.
+    echo GUID folder with icons not found - using Office folder as fallback.
     set "ICONS_FOLDER=%OFFICE_ROOT%"
 )
 
 echo.
 echo Detected paths:
-echo   Office      → %OFFICE_ROOT%
-echo   Icons       → %ICONS_FOLDER%
+echo   Office      - %OFFICE_ROOT%
+echo   Icons       - %ICONS_FOLDER%
 echo.
 
 :: ========================
-:: 2. Remove WPS traces
+:: 2. Remove WPS Processes (Admin required for kill)
 :: ========================
-echo Removing WPS processes and folders...
+echo Stopping WPS processes...
 
+:: Добавлен wpsphoto.exe для очистки WPS Photo
 powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpscenter.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
 powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpscloudsvr.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
+powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpsphoto.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
+powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpsupdate.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
+
+:: ========================
+:: 3. Remove WPS Shortcuts (User context)
+:: ========================
+echo Cleaning WPS shortcuts...
+
+:: Start Menu (C:\Users\User\AppData\Roaming\Microsoft\Windows\Start Menu\Programs)
+if exist "%APPDATA%\Microsoft\Windows\Start Menu\Programs" (
+    echo   Removing Start Menu folder...
+    del /s /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\WPS*" >nul 2>&1
+)
+
+:: Desktop
+echo   Removing Desktop icons...
+del /f /q "%USERPROFILE%\Desktop\WPS*" >nul 2>&1
+
+:: Taskbar (User Pinned)
+echo   Removing Taskbar shortcuts...
+if exist "%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar" (
+    del /f /q "%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\WPS*" >nul 2>&1
+)
+
+:: ========================
+:: 4. Remove WPS Folders (Admin/Elevated)
+:: ========================
+echo Removing WPS folders...
 
 set "local_kingsoft=%LOCALAPPDATA%\Kingsoft"
 set "roaming_kingsoft=%APPDATA%\Kingsoft"
@@ -82,20 +111,62 @@ if exist "%local_kingsoft%"   powershell -Command "Start-Process cmd -ArgumentLi
 if exist "%roaming_kingsoft%" powershell -Command "Start-Process cmd -ArgumentList '/c rmdir /s /q \"%roaming_kingsoft%\"' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
 
 :: ========================
-:: 3. Clean registry + restore VBA TypeLib
+:: 5. Clean Registry + "Open With" + WPS Photo
 :: ========================
 echo Cleaning registry and restoring VBA Extensibility...
 
+:: Base WPS keys
 reg delete "HKCU\Software\Kingsoft" /f >nul 2>&1
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "WPS Office" /f >nul 2>&1
 
+:: WPS Office ProgIDs
 set "wps_prefixes=ET. KET. KWPP. KWPS. WPP. WPS. WPSCloudSv WPSFileSync"
 for %%p in (%wps_prefixes%) do (
     reg delete "HKCU\Software\Classes\%%p" /f >nul 2>&1
     reg delete "HKEY_CLASSES_ROOT\%%p" /f >nul 2>&1
+    reg delete "HKCU\Software\Classes\%%p*" /f >nul 2>&1
+    reg delete "HKEY_CLASSES_ROOT\%%p*" /f >nul 2>&1
 )
 
-:: ─── Restore VBA Extensibility 5.3 TypeLib ───
+set "prefixes=ET. KET. KWPP. KWPS. WPP. WPS."
+
+echo Searching and deleting registry keys in HKEY_CLASSES_ROOT...
+echo.
+
+:: Получаем список всех подразделов в HKCR
+for /f "tokens=*" %%a in ('reg query "HKEY_CLASSES_ROOT"') do (
+    set "key=%%a"
+    
+    :: Убираем "HKEY_CLASSES_ROOT\" из пути
+    set "key=!key:HKEY_CLASSES_ROOT\=!"
+    
+    :: Проверяем, начинается ли ключ с одного из префиксов
+    for %%p in (%prefixes%) do (
+        if "!key!"=="%%p!key:*%%p=!" (
+            echo Deleting: !key!
+            reg delete "HKEY_CLASSES_ROOT\!key!" /f >nul 2>&1
+        )
+    )
+)
+
+:: WPS Photo / Image Viewer ProgIDs (Preview Handler cleanup)
+set "wps_photo_prefixes=WPSPhoto.Document WPS.ImageViewer WPSPhoto JPGFile WPS.PNG"
+for %%p in (%wps_photo_prefixes%) do (
+    reg delete "HKCU\Software\Classes\%%p" /f >nul 2>&1
+    reg delete "HKEY_CLASSES_ROOT\%%p" /f >nul 2>&1
+    reg delete "HKCU\Software\Classes\%%p*" /f >nul 2>&1
+    reg delete "HKEY_CLASSES_ROOT\%%p*" /f >nul 2>&1
+)
+
+:: Clean "Open With" lists (removes WPS from "Open with" menu and resets UserChoice)
+echo Cleaning "Open With" registry lists...
+set "clean_exts=.doc .docx .xls .xlsx .ppt .pptx .csv .jpg .jpeg .png .bmp .gif .tiff"
+for %%e in (%clean_exts%) do (
+    reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\%%e\OpenWithList" /f >nul 2>&1
+    reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\%%e\UserChoice" /f >nul 2>&1
+)
+
+:: ??? Restore VBA Extensibility 5.3 TypeLib ???
 set "SYSTEM_DRIVE=%SystemDrive%"
 
 set "TYPELIB_KEY=HKEY_CLASSES_ROOT\TypeLib\{0002E157-0000-0000-C000-000000000046}"
@@ -125,41 +196,7 @@ reg add "%HELPDIR_KEY%" /ve /t REG_SZ /d "[{0002E157-0000-0000-C000-000000000046
 echo VBA TypeLib entries restored.
 
 :: ========================
-:: WPS Photo / WPS Pictures Aggressive Cleanup
-:: ========================
-echo.
-echo Removing WPS Photo preview handlers and image associations...
-
-:: 1. Deleting all WPS.PIC.* and similar ProgIDs
-for /f "delims=" %%K in ('reg query "HKCR" /s /f "WPS.PIC" 2^>nul ^| findstr /b "HKEY"') do reg delete "%%K" /f >nul 2>&1
-for /f "delims=" %%K in ('reg query "HKCU\Software\Classes" /s /f "WPS.PIC" 2^>nul ^| findstr /b "HKEY"') do reg delete "%%K" /f >nul 2>&1
-
-reg delete "HKCR\WPSPhoto" /f >nul 2>&1
-reg delete "HKCR\WPS.Photos" /f >nul 2>&1
-reg delete "HKCR\Kingsoft.WPSPhoto" /f >nul 2>&1
-reg delete "HKCR\KSPhoto" /f >nul 2>&1
-
-:: 2. Removing the preview and thumbnail handlers (set "img_ext=.jpg .jpeg .png .gif .bmp .tif .tiff .webp .heic .avif .ico")
-set "img_ext=.jpg .jpeg .png"
-
-for %%e in (%img_ext%) do (
-    reg delete "HKCR\%%e\ShellEx\{8895b1c6-b41f-4c1c-a562-0d564250836f}" /f >nul 2>&1
-    reg delete "HKCR\SystemFileAssociations\%%e\ShellEx\{8895b1c6-b41f-4c1c-a562-0d564250836f}" /f >nul 2>&1
-    reg delete "HKCR\%%e\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}" /f >nul 2>&1
-    reg delete "HKCR\SystemFileAssociations\%%e\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}" /f >nul 2>&1
-)
-
-:: 3. Restoring standard Windows image associations
-reg add "HKCR\.jpg"  /ve /t REG_SZ /d "jpegfile" /f >nul
-reg add "HKCR\.jpeg" /ve /t REG_SZ /d "jpegfile" /f >nul
-reg add "HKCR\.png"  /ve /t REG_SZ /d "pngfile"  /f >nul
-reg add "HKCR\.gif"  /ve /t REG_SZ /d "giffile"  /f >nul
-reg add "HKCR\.bmp"  /ve /t REG_SZ /d "Paint.Picture" /f >nul
-
-echo WPS Photo preview handlers removed.
-
-:: ========================
-:: 4. Restore file associations
+:: 6. Restore file associations
 :: ========================
 echo Restoring file associations...
 
@@ -168,20 +205,21 @@ reg add "HKCU\Software\Classes\.doc"  /ve /t REG_SZ /d "Word.Document.8" /f >nul
 reg add "HKCU\Software\Classes\.docx" /ve /t REG_SZ /d "Word.Document.12" /f >nul
 reg add "HKCU\Software\Classes\Word.Document.8\shell\open\command"  /ve /t REG_SZ /d "\"%OFFICE_ROOT%\WINWORD.EXE\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\Word.Document.12\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\WINWORD.EXE\" \"%%1\"" /f >nul
-reg add "HKCU\Software\Classes\Excel.CSV\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\EXCEL.EXE\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\Word.Document.8\DefaultIcon"  /ve /t REG_SZ /d "%ICONS_FOLDER%\wordicon.exe,1" /f >nul
 reg add "HKCU\Software\Classes\Word.Document.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\wordicon.exe,1" /f >nul
-reg add "HKCU\Software\Classes\Excel.CSV\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\xlicons.exe,1" /f >nul
 
 :: Excel
 reg add "HKCU\Software\Classes\.xls"  /ve /t REG_SZ /d "Excel.Sheet.8" /f >nul
 reg add "HKCU\Software\Classes\.xlsx" /ve /t REG_SZ /d "Excel.Sheet.12" /f >nul
-reg add "HKCU\Software\Classes\.csv" /ve /t REG_SZ /d "Excel.CSV" /f >nul
-reg add "HKCU\Software\Classes\.csv" /v "Content Type" /t REG_SZ /d "text/csv" /f >nul
 reg add "HKCU\Software\Classes\Excel.Sheet.8\shell\open\command"  /ve /t REG_SZ /d "\"%OFFICE_ROOT%\EXCEL.EXE\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\Excel.Sheet.12\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\EXCEL.EXE\" \"%%1\"" /f >nul
 reg add "HKCU\Software\Classes\Excel.Sheet.8\DefaultIcon"  /ve /t REG_SZ /d "%ICONS_FOLDER%\xlicons.exe,1" /f >nul
 reg add "HKCU\Software\Classes\Excel.Sheet.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\xlicons.exe,1" /f >nul
+
+:: CSV (Added)
+reg add "HKCU\Software\Classes\.csv" /ve /t REG_SZ /d "Excel.Sheet.8" /f >nul
+reg add "HKCU\Software\Classes\Excel.Sheet.8\shell\open\command" /ve /t REG_SZ /d "\"%OFFICE_ROOT%\EXCEL.EXE\" \"%%1\"" /f >nul
+reg add "HKCU\Software\Classes\Excel.Sheet.8\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\xlicons.exe,1" /f >nul
 
 :: PowerPoint
 reg add "HKCU\Software\Classes\.ppt"  /ve /t REG_SZ /d "PowerPoint.Show.8" /f >nul
@@ -192,9 +230,9 @@ reg add "HKCU\Software\Classes\PowerPoint.Show.8\DefaultIcon"  /ve /t REG_SZ /d 
 reg add "HKCU\Software\Classes\PowerPoint.Show.12\DefaultIcon" /ve /t REG_SZ /d "%ICONS_FOLDER%\pptico.exe,1" /f >nul
 
 :: ========================
-:: 5. Restore "New - WORD/EXCEL Document" context menu
+:: 7. Restore "New - Word Document" context menu
 :: ========================
-echo Restoring "New - WORD/EXCEL Document" option...
+echo Restoring "New - Word Document" option...
 
 set "TEMPLATES_FOLDER=%USERPROFILE%\Documents\Custom Office Templates"
 if not exist "%TEMPLATES_FOLDER%" mkdir "%TEMPLATES_FOLDER%"
@@ -208,13 +246,12 @@ reg add "HKCU\Software\Classes\.docx\ShellNew" /v "NullFile" /t REG_SZ /d "" /f 
 reg add "HKCU\Software\Classes\.doc\ShellNew"  /v "NullFile" /t REG_SZ /d "" /f >nul 2>nul
 
 :: ========================
-:: 6. Update icon cache
+:: 8. Update icon cache
 :: ========================
-echo Updating icon and thumbnail cache...
+echo Updating icon cache...
 
 del /q /f "%LocalAppData%\IconCache.db" >nul 2>&1
 del /q /f "%LocalAppData%\Microsoft\Windows\Explorer\iconcache_*" >nul 2>&1
-del /q /f "%LocalAppData%\Microsoft\Windows\Explorer\thumbcache_*.db" >nul 2>&1
 
 powershell -Command "Start-Process taskkill -ArgumentList '/f /im explorer.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
 start explorer.exe >nul 2>&1
@@ -226,7 +263,7 @@ timeout /t 4 >nul
 echo.
 echo ===================================================
 echo   Completed!
-echo   WPS traces removed, Office associations restored.
+echo   WPS traces, icons, and associations removed.
 echo   Office path:    %OFFICE_ROOT%
 echo   Icons from:     %ICONS_FOLDER%
 echo ===================================================
