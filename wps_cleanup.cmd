@@ -72,12 +72,8 @@ echo.
 :: ========================
 echo Stopping WPS processes...
 
-:: Добавлен wpsphoto.exe для очистки WPS Photo
-powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpscenter.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
-powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpscloudsvr.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
-powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpsphoto.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
-powershell -Command "Start-Process taskkill -ArgumentList '/f /im wpsupdate.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
-
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "Start-Process 'cmd' -ArgumentList '/c taskkill /f /im wpscenter.exe & taskkill /f /im wpscloudsvr.exe & taskkill /f /im wpsphoto.exe & taskkill /f /im wpsupdate.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
 :: ========================
 :: 3. Remove WPS Shortcuts (User context)
 :: ========================
@@ -253,7 +249,7 @@ echo Updating icon cache...
 del /q /f "%LocalAppData%\IconCache.db" >nul 2>&1
 del /q /f "%LocalAppData%\Microsoft\Windows\Explorer\iconcache_*" >nul 2>&1
 
-powershell -Command "Start-Process taskkill -ArgumentList '/f /im explorer.exe' -Verb RunAs -WindowStyle Hidden -Wait" 2>nul
+taskkill /f /im explorer.exe 2>nul
 start explorer.exe >nul 2>&1
 timeout /t 4 >nul
 
